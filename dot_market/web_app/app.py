@@ -16,7 +16,8 @@ from pathlib import Path
 
 import numpy as np
 import yfinance as yf
-from flask import Flask, g, jsonify, render_template, request, send_file
+from flask import Flask, g, jsonify, render_template, request, send_file, session, redirect, url_for
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # ── Project path setup ────────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 # ── Flask app ─────────────────────────────────────────────────────────────────
 app = Flask(__name__, template_folder="templates", static_folder="static")
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dot_market_dev_secret")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 MODELS_DIR  = PROJECT_ROOT / "ml_model" / "saved_models"
@@ -84,6 +86,13 @@ def init_db():
             prediction_date TEXT    NOT NULL,
             accuracy_pct    REAL,
             signal          TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL
         )
     """)
     conn.commit()
@@ -277,7 +286,69 @@ def _demo_data() -> dict:
 
 @app.route("/")
 def index():
+    if not session.get("logged_in"):
+        return redirect(url_for("login"))
     return render_template("index.html")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        is_demo = request.form.get("demo") == "true"
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "").strip()
+
+        if is_demo:
+            session["logged_in"] = True
+            session["user"] = "demo"
+            return redirect(url_for("index"))
+        
+        db = get_db()
+        user_row = db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+        
+        if user_row and check_password_hash(user_row["password_hash"], password):
+            session["logged_in"] = True
+            session["user"] = username
+            return redirect(url_for("index"))
+        
+        return render_template("login.html", error="Invalid username or password.")
+
+    return render_template("login.html")
+
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "").strip()
+        confirm = request.form.get("confirm", "").strip()
+
+        if not username or not password:
+            return render_template("signup.html", error="Username and password are required.")
+        if password != confirm:
+            return render_template("signup.html", error="Passwords do not match.")
+
+        db = get_db()
+        existing = db.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+        if existing:
+            return render_template("signup.html", error="Username already exists.")
+
+        try:
+            pass_hash = generate_password_hash(password)
+            db.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, pass_hash))
+            db.commit()
+        except Exception as e:
+            return render_template("signup.html", error=f"Database error: {e}")
+
+        session["logged_in"] = True
+        session["user"] = username
+        return redirect(url_for("index"))
+
+    return render_template("signup.html")
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
 
 
 @app.route("/predict", methods=["POST"])
