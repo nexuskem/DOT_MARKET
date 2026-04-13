@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DOT MARKET — AI Stock Prediction Dashboard</title>
+  <meta name="description" content="DOT MARKET: AI-powered LSTM stock price prediction dashboard. Predict next-day closing prices, analyze technicals, and manage your portfolio watchlist." />
+  <meta name="theme-color" content="#0a0a0f" />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+  <!-- Plotly.js CDN -->
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js" defer></script>
+
+  <!-- App CSS -->
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     LOADING SPINNER
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<div class="spinner-overlay" id="spinner-overlay" aria-live="polite">
+  <div class="spinner"></div>
+  <p class="spinner-text" id="spinner-text">Fetching Prediction…</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     TOAST CONTAINER
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<div class="toast-container" id="toast-container" aria-live="assertive"></div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     WATCHLIST SIDEBAR
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<div class="watchlist-overlay" id="watchlist-overlay"></div>
+<aside class="watchlist-sidebar" id="watchlist-sidebar" aria-label="Watchlist">
+  <div class="sidebar-header">
+    <h2>📋 Watchlist</h2>
+    <button class="sidebar-close-btn" onclick="closeWatchlistSidebar()" aria-label="Close watchlist">✕</button>
+  </div>
+  <div class="watchlist-items" id="wl-items">
+    <div class="watchlist-empty">
+      <div class="empty-icon">📋</div>
+      <p>Your watchlist is empty.</p>
+    </div>
+  </div>
+  <div style="padding:16px 24px;border-top:1px solid var(--border);">
+    <p style="font-size:11px;color:var(--text-muted);">Prices refresh every 60 seconds</p>
+  </div>
+</aside>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     PRICE ALERTS MODAL
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="alerts-modal-overlay" role="dialog" aria-modal="true" aria-label="Price Alerts">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>🔔 Price Alerts</h2>
+      <button class="sidebar-close-btn" onclick="closeAlertsModal()" aria-label="Close alerts modal">✕</button>
+    </div>
+
+    <div class="alert-form">
+      <input id="alert-ticker-input" class="alert-input" type="text"
+             placeholder="AAPL" maxlength="6" style="width:90px;text-transform:uppercase;" />
+      <select id="alert-direction-select" class="alert-input" style="width:100px;">
+        <option value="above">≥ Above</option>
+        <option value="below">≤ Below</option>
+      </select>
+      <input id="alert-price-input" class="alert-input" type="number"
+             placeholder="$185.00" step="0.01" min="0" style="width:110px;" />
+      <button class="btn-primary" onclick="handleAlertFormSubmit()">Set Alert</button>
+    </div>
+
+    <div class="divider"></div>
+    <p class="card-title" style="margin-bottom:12px;"><span class="icon">📌</span> Active Alerts</p>
+    <div class="alert-list" id="alerts-list">
+      <p style="color:var(--text-muted);font-size:13px;">No active alerts.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     NAVBAR
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<nav class="navbar" role="navigation" aria-label="Main navigation">
+  <a class="nav-logo" href="/" aria-label="DOT MARKET Home">
+    <div class="nav-logo-dot" aria-hidden="true"></div>
+    <span class="nav-logo-text">DOT MARKET</span>
+  </a>
+
+  <form class="nav-search" onsubmit="handleSearchSubmit(event)" role="search">
+    <span style="color:var(--text-muted);font-size:14px;">$</span>
+    <input id="ticker-input" type="text" placeholder="Search ticker… (e.g. AAPL)"
+           maxlength="10" autocomplete="off" autocapitalize="characters"
+           aria-label="Stock ticker search" />
+    <button type="submit" class="nav-search-btn" id="predict-btn">PREDICT</button>
+  </form>
+
+  <div class="nav-actions">
+    <button class="nav-btn" id="theme-toggle-btn" onclick="toggleTheme()" aria-label="Toggle dark/light mode" title="Toggle theme">
+      🌙 Dark
+    </button>
+    <button class="nav-btn" onclick="openAlertsModal()" aria-label="Open price alerts">
+      🔔 Alerts
+    </button>
+    <button class="nav-btn" onclick="openWatchlistSidebar()" aria-label="Open watchlist">
+      📋 Watchlist <span class="watchlist-badge" id="wl-badge">0</span>
+    </button>
+  </div>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     PAGE WRAPPER
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<main class="page-wrapper" role="main">
+
+  <!-- ── Trending pills ─────────────────────────────────────────────────── -->
+  <div class="trending-bar" id="trending-bar" aria-label="Trending stocks">
+    <!-- Populated by JS -->
+    <div class="trending-pill" onclick="runPrediction('GOOGL')">GOOGL</div>
+    <div class="trending-pill" onclick="runPrediction('AAPL')">AAPL</div>
+    <div class="trending-pill" onclick="runPrediction('MSFT')">MSFT</div>
+    <div class="trending-pill" onclick="runPrediction('NVDA')">NVDA</div>
+    <div class="trending-pill" onclick="runPrediction('TSLA')">TSLA</div>
+    <div class="trending-pill" onclick="runPrediction('META')">META</div>
+    <div class="trending-pill" onclick="runPrediction('AMZN')">AMZN</div>
+    <div class="trending-pill" onclick="runPrediction('NFLX')">NFLX</div>
+    <div class="trending-pill" onclick="runPrediction('AMD')">AMD</div>
+    <div class="trending-pill" onclick="runPrediction('INTC')">INTC</div>
+    <div class="trending-pill text-blue" onclick="runPrediction('DEMO')">DEMO ✦</div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       HERO PREDICTION CARD
+       ══════════════════════════════════════════════════════════════════════ -->
+  <section class="hero-card" id="hero-card" aria-label="Prediction result">
+
+    <!-- Left: Ticker + current price -->
+    <div class="hero-ticker-block">
+      <div class="hero-ticker" id="hero-ticker">—</div>
+      <div class="hero-company" id="hero-company">Select a stock to begin</div>
+      <div style="margin-top:16px;">
+        <div class="hero-current-label">CURRENT PRICE <span class="live-dot" id="live-dot" style="display:none;"></span></div>
+        <div class="hero-current-price" id="hero-current">
+          <span class="text-muted">—</span>
+        </div>
+      </div>
+      <div class="stats-strip" style="margin-top:16px;">
+        <div class="stat-chip">
+          <span class="stat-chip-label">RSI</span>
+          <span class="stat-chip-value" id="hero-rsi">—</span>
+        </div>
+        <div class="stat-chip">
+          <span class="stat-chip-label">MACD</span>
+          <span class="stat-chip-value" id="hero-macd">—</span>
+        </div>
+        <div class="stat-chip">
+          <span class="stat-chip-label">Volume</span>
+          <span class="stat-chip-value" id="hero-volume">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Center: Predicted price -->
+    <div class="hero-prediction-block">
+      <div class="hero-pred-label">PREDICTED NEXT-DAY CLOSE</div>
+      <div class="hero-pred-price" id="hero-pred">—</div>
+      <div class="hero-change" id="hero-change">
+        <span class="text-muted" style="font-size:14px;font-family:inherit;">Make a prediction to see results</span>
+      </div>
+    </div>
+
+    <!-- Right: Signal + Confidence + Heart -->
+    <div class="hero-signals-block">
+      <div id="hero-signal-badge" class="signal-badge HOLD" style="opacity:0.3;">— —</div>
+
+      <div class="confidence-block">
+        <div class="confidence-label">
+          <span>Model Confidence</span>
+          <span id="hero-confidence-val">0%</span>
+        </div>
+        <div class="confidence-bar-bg">
+          <div class="confidence-bar-fill" id="hero-confidence-bar" style="width:0%"></div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:center;">
+        <button class="watchlist-heart-btn" id="wl-heart-btn"
+                onclick="toggleWatchlistHeart(currentTicker)"
+                title="Add to Watchlist" aria-label="Toggle watchlist">♡</button>
+        <button class="export-btn" id="export-btn" onclick="exportPDF()" title="Download PDF report">
+          📄 PDF Report
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       MAIN CANDLESTICK CHART
+       ══════════════════════════════════════════════════════════════════════ -->
+  <section class="card chart-section accent-top section-gap" aria-label="Price chart">
+    <div class="chart-controls">
+      <div class="section-title">
+        <span>📈</span>
+        <span id="chart-title">Price Chart</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <div class="chart-overlays">
+          <label class="overlay-toggle">
+            <input type="checkbox" id="ov-sma50" checked onchange="toggleOverlay('sma50',this.checked)" />
+            <span class="overlay-dot" style="background:#ff9f43;"></span> SMA50
+          </label>
+          <label class="overlay-toggle">
+            <input type="checkbox" id="ov-sma200" checked onchange="toggleOverlay('sma200',this.checked)" />
+            <span class="overlay-dot" style="background:#00d4ff;"></span> SMA200
+          </label>
+          <label class="overlay-toggle">
+            <input type="checkbox" id="ov-bb" checked onchange="toggleOverlay('bb',this.checked)" />
+            <span class="overlay-dot" style="background:#a855f7;"></span> Bollinger
+          </label>
+          <label class="overlay-toggle">
+            <input type="checkbox" id="ov-pred" checked onchange="toggleOverlay('pred',this.checked)" />
+            <span class="overlay-dot" style="background:#00ff88;"></span> Forecast
+          </label>
+        </div>
+        <div class="time-range-btns" role="group" aria-label="Time range">
+          <button class="time-btn" onclick="setTimeRange('1W')" id="tr-1W">1W</button>
+          <button class="time-btn" onclick="setTimeRange('1M')" id="tr-1M">1M</button>
+          <button class="time-btn active" onclick="setTimeRange('3M')" id="tr-3M">3M</button>
+          <button class="time-btn" onclick="setTimeRange('6M')" id="tr-6M">6M</button>
+          <button class="time-btn" onclick="setTimeRange('1Y')" id="tr-1Y">1Y</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="main-chart" style="height:400px;">
+      <div class="chart-placeholder">Enter a ticker above and click PREDICT</div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       INDICATORS ROW (RSI, MACD, Volume)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <div class="indicators-row section-gap" aria-label="Technical indicators">
+
+    <div class="card accent-top">
+      <div class="card-title"><span class="icon">📊</span> RSI (14)</div>
+      <div id="rsi-chart" style="height:200px;">
+        <div class="chart-placeholder">Awaiting data…</div>
+      </div>
+    </div>
+
+    <div class="card accent-top">
+      <div class="card-title"><span class="icon">📉</span> MACD (12,26,9)</div>
+      <div id="macd-chart" style="height:200px;">
+        <div class="chart-placeholder">Awaiting data…</div>
+      </div>
+    </div>
+
+    <div class="card accent-top">
+      <div class="card-title"><span class="icon">📦</span> Volume + MA20</div>
+      <div id="volume-chart" style="height:200px;">
+        <div class="chart-placeholder">Awaiting data…</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       COMPARE STOCKS PANEL
+       ══════════════════════════════════════════════════════════════════════ -->
+  <section class="card section-gap" aria-label="Compare stocks">
+    <div class="section-header">
+      <div>
+        <div class="section-title"><span>⚖️</span> Compare Stocks</div>
+        <div class="section-subtitle">Normalised performance (base = 100)</div>
+      </div>
+    </div>
+
+    <div class="compare-inputs">
+      <input id="cmp-1" class="compare-input" type="text" placeholder="AAPL" maxlength="8" />
+      <input id="cmp-2" class="compare-input" type="text" placeholder="MSFT" maxlength="8" />
+      <input id="cmp-3" class="compare-input" type="text" placeholder="NVDA" maxlength="8" />
+      <button class="btn-primary" onclick="handleCompare()">Compare</button>
+    </div>
+
+    <div id="compare-chart" style="height:280px;">
+      <div class="chart-placeholder">Enter up to 3 tickers and click Compare</div>
+    </div>
+
+    <div class="compare-signals" id="compare-signals"></div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       NEWS & SENTIMENT
+       ══════════════════════════════════════════════════════════════════════ -->
+  <section class="section-gap" aria-label="News and sentiment">
+    <div class="section-header">
+      <div class="section-title"><span>📰</span> News &amp; Sentiment — <span id="news-ticker-label" style="color:var(--accent-blue);">—</span></div>
+      <button class="nav-btn" onclick="loadNews(currentTicker)">↻ Refresh</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 260px;gap:16px;" id="news-layout">
+
+      <!-- News list -->
+      <div class="card" id="news-card">
+        <div class="news-list" id="news-list">
+          <div style="color:var(--text-muted);font-size:13px;padding:20px 0;">
+            Select a stock to see news…
+          </div>
+        </div>
+      </div>
+
+      <!-- Sentiment gauge -->
+      <div class="card sentiment-gauge" id="sentiment-card">
+        <div class="card-title" style="text-align:center;justify-content:center;">Overall Sentiment</div>
+        <div id="overall-sentiment-chart" style="height:160px;"></div>
+        <div id="gauge-score" class="gauge-value neutral">—</div>
+        <div id="gauge-label" class="gauge-label">Awaiting data…</div>
+        <div style="margin-top:20px;text-align:left;">
+          <div class="divider"></div>
+          <div style="font-size:12px;color:var(--text-muted);display:flex;flex-direction:column;gap:6px;">
+            <div>🟢 <strong>Positive</strong> news drives bullish sentiment</div>
+            <div>🔴 <strong>Negative</strong> news signals caution</div>
+            <div>⚪ <strong>Neutral</strong> = no strong signal</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       BOTTOM GRID: Earnings Calendar + Leaderboard
+       ══════════════════════════════════════════════════════════════════════ -->
+  <div class="bottom-grid section-gap">
+
+    <!-- Earnings Calendar -->
+    <section class="card" aria-label="Earnings calendar">
+      <div class="card-title"><span class="icon">📅</span> Earnings Calendar</div>
+      <table class="earnings-table" id="earnings-table">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Company</th>
+            <th>Earnings Date</th>
+            <th>EPS Est.</th>
+          </tr>
+        </thead>
+        <tbody id="earnings-body">
+          <tr><td colspan="4" style="color:var(--text-muted);padding:20px;">
+            Add stocks to watchlist to track earnings…
+          </td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Leaderboard -->
+    <section class="card" aria-label="Prediction history leaderboard">
+      <div class="section-header" style="margin-bottom:12px;">
+        <div class="card-title" style="margin-bottom:0;"><span class="icon">🏆</span> Prediction History</div>
+        <button class="nav-btn" style="font-size:11px;" onclick="loadLeaderboard()">↻ Refresh</button>
+      </div>
+      <table class="leaderboard-table" id="leaderboard-table">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Predicted</th>
+            <th>Date</th>
+            <th>Signal</th>
+          </tr>
+        </thead>
+        <tbody id="leaderboard-body">
+          <tr><td colspan="4" style="color:var(--text-muted);">No predictions yet…</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+  </div>
+
+</main>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     FOOTER
+     ══════════════════════════════════════════════════════════════════════════ -->
+<footer class="footer">
+  <span>⬤ DOT MARKET</span>
+  <span>Built with LSTM + Flask</span>
+  <span>🎓 School Project</span>
+  <a href="https://github.com" target="_blank" rel="noopener">GitHub ↗</a>
+  <span id="health-status" style="font-size:11px;"></span>
+</footer>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     JAVASCRIPT
+     ══════════════════════════════════════════════════════════════════════════ -->
+<script src="/static/charts.js"></script>
+<script src="/static/watchlist.js"></script>
+<script src="/static/alerts.js"></script>
+<script>
+// ════════════════════════════════════════════════════════════════════════════
+// APP STATE
+// ════════════════════════════════════════════════════════════════════════════
+let currentTicker   = '';
+let currentData     = null;
+let currentRange    = '3M';
+const LIVE_REFRESH  = 30_000; // ms — auto-refresh current price display
+
+console.log('[app] DOT MARKET initialised ✓');
+
+// ════════════════════════════════════════════════════════════════════════════
+// TOAST
+// ════════════════════════════════════════════════════════════════════════════
+function showToast(message, type = 'info', duration = 4000) {
+  const icons = { success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️' };
+  const container = document.getElementById('toast-container');
+  const toast     = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `<span class="toast-icon">${icons[type] || 'ℹ️'}</span>
+                     <span class="toast-message">${message}</span>`;
+  container.appendChild(toast);
+  requestAnimationFrame(() => { requestAnimationFrame(() => toast.classList.add('show')); });
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 400);
+  }, duration);
+  console.log(`[toast] ${type}: ${message}`);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SPINNER
+// ════════════════════════════════════════════════════════════════════════════
+function showSpinner(text = 'Fetching Prediction…') {
+  document.getElementById('spinner-text').textContent = text;
+  document.getElementById('spinner-overlay').classList.add('active');
+}
+
+function hideSpinner() {
+  document.getElementById('spinner-overlay').classList.remove('active');
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// THEME TOGGLE
+// ════════════════════════════════════════════════════════════════════════════
+function toggleTheme() {
+  document.body.classList.toggle('light-mode');
+  const isDark = !document.body.classList.contains('light-mode');
+  const btn    = document.getElementById('theme-toggle-btn');
+  btn.textContent = isDark ? '🌙 Dark' : '☀️ Light';
+  localStorage.setItem('dm_theme', isDark ? 'dark' : 'light');
+  if (currentData) refreshAllCharts(currentData);
+  console.log('[app] Theme:', isDark ? 'dark' : 'light');
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SEARCH / PREDICT
+// ════════════════════════════════════════════════════════════════════════════
+function handleSearchSubmit(e) {
+  e.preventDefault();
+  const val = document.getElementById('ticker-input').value.trim().toUpperCase();
+  if (!val) { showToast('Please enter a ticker symbol.', 'error'); return; }
+  runPrediction(val);
+}
+
+async function runPrediction(ticker) {
+  ticker = ticker.trim().toUpperCase();
+  if (!ticker) return;
+
+  console.log('[app] Running prediction for', ticker);
+  document.getElementById('ticker-input').value = ticker;
+  showSpinner(`Predicting ${ticker}…`);
+
+  try {
+    const res = await fetch('/predict', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ ticker }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    currentTicker = data.ticker;
+    currentData   = data;
+    cacheForSparkline(ticker, data);
+
+    updateHeroCard(data);
+    renderAllCharts(data, currentRange);
+    loadNews(ticker);
+    loadLeaderboard();
+    syncHeartButton(ticker);
+
+    showToast(`Prediction ready for ${ticker}`, 'success');
+  } catch (err) {
+    console.error('[predict] Error:', err);
+    showToast(`Prediction failed: ${err.message}`, 'error');
+  } finally {
+    hideSpinner();
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// UPDATE HERO CARD
+// ════════════════════════════════════════════════════════════════════════════
+function updateHeroCard(data) {
+  document.getElementById('hero-ticker').textContent  = data.ticker;
+  document.getElementById('hero-company').textContent = data.company_name;
+
+  const priceStr = `$${data.current_price.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+  document.getElementById('hero-current').innerHTML =
+    `${priceStr} <span class="live-dot" id="live-dot"></span>`;
+
+  const predStr = `$${data.predicted_price.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+  document.getElementById('hero-pred').textContent = predStr;
+
+  const up       = data.change_pct >= 0;
+  const chgEl    = document.getElementById('hero-change');
+  const arrow    = up ? '▲' : '▼';
+  const sign     = up ? '+' : '';
+  chgEl.innerHTML = `<span class="hero-arrow">${arrow}</span> ${sign}${data.change_pct.toFixed(2)}%`;
+  chgEl.className = `hero-change ${up ? 'up' : 'down'}`;
+
+  const badge = document.getElementById('hero-signal-badge');
+  badge.textContent = data.signal;
+  badge.className   = `signal-badge ${data.signal}`;
+  badge.style.opacity = '1';
+
+  const pct = data.confidence;
+  document.getElementById('hero-confidence-val').textContent = `${pct}%`;
+  document.getElementById('hero-confidence-bar').style.width = `${pct}%`;
+
+  // Stat chips
+  const lastRSI  = data.rsi  && data.rsi.length  ? data.rsi[data.rsi.length - 1] : null;
+  const lastMACD = data.macd && data.macd.length ? data.macd[data.macd.length - 1] : null;
+  const lastVol  = data.volume && data.volume.length ? data.volume[data.volume.length - 1] : null;
+
+  document.getElementById('hero-rsi').textContent   = lastRSI  != null ? lastRSI.toFixed(1) : '—';
+  document.getElementById('hero-macd').textContent  = lastMACD != null ? lastMACD.toFixed(3) : '—';
+  document.getElementById('hero-volume').textContent = lastVol  != null ? formatVolume(lastVol) : '—';
+
+  document.getElementById('chart-title').textContent = `${data.ticker} — ${data.company_name}`;
+  document.title = `${data.ticker} $${data.predicted_price} — DOT MARKET`;
+  console.log('[app] Hero card updated');
+}
+
+function formatVolume(v) {
+  if (v >= 1e9) return (v / 1e9).toFixed(1) + 'B';
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+  if (v >= 1e3) return (v / 1e3).toFixed(0) + 'K';
+  return String(v);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// RENDER ALL CHARTS
+// ════════════════════════════════════════════════════════════════════════════
+function renderAllCharts(data, range) {
+  const days   = { '1W': 7, '1M': 30, '3M': 90, '6M': 180, '1Y': 365 }[range] || 90;
+  const sliced = sliceData(data, days);
+
+  renderCandlestick('main-chart', sliced, getCurrentOverlays());
+  renderRSI('rsi-chart', sliced.historical_dates, sliced.rsi);
+  renderMACD('macd-chart', sliced.historical_dates, sliced.macd, sliced.macd_signal);
+  renderVolume('volume-chart', sliced.historical_dates, sliced.volume);
+  console.log('[app] All charts rendered for range', range);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// TIME RANGE
+// ════════════════════════════════════════════════════════════════════════════
+function setTimeRange(range) {
+  currentRange = range;
+  document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById(`tr-${range}`);
+  if (btn) btn.classList.add('active');
+  if (currentData) renderAllCharts(currentData, range);
+  console.log('[app] Time range set to', range);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// OVERLAY TOGGLE
+// ════════════════════════════════════════════════════════════════════════════
+function toggleOverlay(key, checked) {
+  setOverlay(key, checked);
+  if (currentData) {
+    const days   = { '1W': 7, '1M': 30, '3M': 90, '6M': 180, '1Y': 365 }[currentRange] || 90;
+    renderCandlestick('main-chart', sliceData(currentData, days), getCurrentOverlays());
+  }
+  console.log('[app] Overlay toggled:', key, checked);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// COMPARE STOCKS
+// ════════════════════════════════════════════════════════════════════════════
+async function handleCompare() {
+  const inputs   = ['cmp-1', 'cmp-2', 'cmp-3'].map(id => document.getElementById(id).value.trim().toUpperCase()).filter(Boolean);
+  if (inputs.length === 0) { showToast('Enter at least one ticker to compare.', 'error'); return; }
+
+  console.log('[compare] Comparing:', inputs);
+  showSpinner('Comparing stocks…');
+
+  const datasets = [];
+  const signals  = [];
+
+  for (const ticker of inputs) {
+    try {
+      const res  = await fetch('/predict', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      datasets.push({ ticker, dates: data.historical_dates, prices: data.historical_close });
+      signals.push({ ticker, signal: data.signal, change_pct: data.change_pct, price: data.current_price });
+    } catch (err) {
+      showToast(`Failed to load ${ticker}: ${err.message}`, 'warning');
+    }
+  }
+
+  hideSpinner();
+  if (datasets.length === 0) return;
+
+  renderCompare('compare-chart', datasets);
+
+  const sigContainer = document.getElementById('compare-signals');
+  sigContainer.innerHTML = signals.map(s => `
+    <div class="compare-signal-pill">
+      <span class="text-blue">${s.ticker}</span>
+      <span class="signal-badge ${s.signal}" style="font-size:12px;padding:4px 12px;">${s.signal}</span>
+      <span class="${s.change_pct >= 0 ? 'text-green' : 'text-red'}">${s.change_pct >= 0 ? '+' : ''}${s.change_pct.toFixed(2)}%</span>
+    </div>`).join('');
+
+  console.log('[compare] Done');
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// NEWS
+// ════════════════════════════════════════════════════════════════════════════
+async function loadNews(ticker) {
+  if (!ticker) return;
+  console.log('[news] Loading for', ticker);
+  document.getElementById('news-ticker-label').textContent = ticker;
+
+  const newsList = document.getElementById('news-list');
+  newsList.innerHTML = '<div class="skeleton skeleton-text" style="width:80%;"></div>'.repeat(5);
+
+  try {
+    const res  = await fetch(`/news/${ticker}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    if (!data.length) {
+      newsList.innerHTML = '<p style="color:var(--text-muted);">No news found.</p>';
+      return;
+    }
+
+    newsList.innerHTML = data.map(item => `
+      <div class="news-item">
+        <span class="sentiment-pill ${item.sentiment}">${item.sentiment}</span>
+        <div class="news-item-content">
+          <div class="news-title">${item.title}</div>
+          <div class="news-meta">
+            <span>🕐 ${item.time}</span>
+            <span>Score: ${item.score > 0 ? '+' : ''}${item.score.toFixed(2)}</span>
+          </div>
+          <a class="news-link" href="${item.link}" target="_blank" rel="noopener">Open article ↗</a>
+        </div>
+      </div>`).join('');
+
+    // Overall sentiment gauge
+    const avg    = data.reduce((s, i) => s + i.score, 0) / data.length;
+    const gaugeEl = document.getElementById('gauge-score');
+    const labelEl = document.getElementById('gauge-label');
+    gaugeEl.textContent = avg > 0.05 ? `+${avg.toFixed(2)}` : avg.toFixed(2);
+    gaugeEl.className   = `gauge-value ${avg > 0.05 ? 'positive' : avg < -0.05 ? 'negative' : 'neutral'}`;
+    labelEl.textContent = avg > 0.05 ? 'Bullish Sentiment' : avg < -0.05 ? 'Bearish Sentiment' : 'Neutral Sentiment';
+
+    renderSentimentGauge('overall-sentiment-chart', avg);
+    console.log('[news] Loaded', data.length, 'articles, avg score:', avg.toFixed(3));
+  } catch (err) {
+    newsList.innerHTML = `<p style="color:var(--accent-red);">Failed to load news: ${err.message}</p>`;
+    console.error('[news] Error:', err);
+  }
+}
+
+function renderSentimentGauge(elId, score) {
+  // score ranges -1 to +1; map to 0-100
+  const val  = Math.round((score + 1) / 2 * 100);
+  const color = score > 0.05 ? '#00ff88' : score < -0.05 ? '#ff4757' : '#ff9f43';
+  const t     = getTheme();
+
+  Plotly.react(elId, [{ type: 'indicator', mode: 'gauge+number',
+    value: val,
+    gauge: {
+      axis:       { range: [0, 100], tickfont: { size: 9, color: t.font_color } },
+      bar:        { color },
+      bgcolor:    t.plot_bgcolor,
+      bordercolor: t.grid_color,
+      steps: [
+        { range: [0,  40], color: 'rgba(255,71,87,0.15)' },
+        { range: [40, 60], color: 'rgba(255,159,67,0.15)' },
+        { range: [60,100], color: 'rgba(0,255,136,0.15)' },
+      ],
+      threshold: { line: { color, width: 3 }, thickness: 0.75, value: val },
+    },
+    number: { suffix: '%', font: { color: t.font_color, size: 24 } },
+  }], {
+    paper_bgcolor: 'transparent',
+    plot_bgcolor:  'transparent',
+    margin: { t: 20, r: 20, b: 20, l: 20 },
+    font:   { color: t.font_color, size: 11 },
+  }, { responsive: true, displayModeBar: false });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// LEADERBOARD
+// ════════════════════════════════════════════════════════════════════════════
+async function loadLeaderboard() {
+  if (!currentTicker) return;
+  console.log('[leaderboard] Loading for', currentTicker);
+  try {
+    const res  = await fetch(`/history/${currentTicker}`);
+    const rows = await res.json();
+    if (rows.error) throw new Error(rows.error);
+
+    const body = document.getElementById('leaderboard-body');
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="4" style="color:var(--text-muted);">No history yet.</td></tr>';
+      return;
+    }
+
+    body.innerHTML = rows.map((r, i) => {
+      const sigClass = r.signal === 'BUY' ? 'text-green' : r.signal === 'SELL' ? 'text-red' : 'text-orange';
+      return `<tr>
+        <td class="text-blue">${r.ticker}</td>
+        <td>$${parseFloat(r.predicted_price).toFixed(2)}</td>
+        <td>${r.prediction_date}</td>
+        <td class="${sigClass}">${r.signal || '—'}</td>
+      </tr>`;
+    }).join('');
+  } catch (err) {
+    console.error('[leaderboard] Error:', err);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// EARNINGS CALENDAR
+// ════════════════════════════════════════════════════════════════════════════
+async function loadEarningsCalendar() {
+  const tickers = wlLoad();
+  if (!tickers.length) return;
+  console.log('[earnings] Loading for watchlist:', tickers);
+
+  const companyNames = {
+    GOOGL: 'Alphabet Inc.',  MSFT: 'Microsoft', AAPL: 'Apple Inc.',
+    AMZN: 'Amazon',         NVDA: 'NVIDIA',    TSLA: 'Tesla',
+    META: 'Meta Platforms',  NFLX: 'Netflix',   AMD: 'AMD',  INTC: 'Intel',
+  };
+
+  const body = document.getElementById('earnings-body');
+  body.innerHTML = '<tr><td colspan="4" style="color:var(--text-muted);">Loading…</td></tr>';
+
+  const rows = [];
+  for (const t of tickers.slice(0, 6)) {
+    try {
+      const res  = await fetch(`/earnings/${t}`);
+      const data = await res.json();
+      rows.push({ ticker: t, company: companyNames[t] || t, earnings_date: data.earnings_date || 'N/A', eps: data.eps_estimate || 'N/A' });
+    } catch {
+      rows.push({ ticker: t, company: companyNames[t] || t, earnings_date: 'N/A', eps: 'N/A' });
+    }
+  }
+
+  body.innerHTML = rows.map(r => `
+    <tr>
+      <td class="text-blue text-mono">${r.ticker}</td>
+      <td>${r.company}</td>
+      <td class="text-mono">${r.earnings_date}</td>
+      <td class="text-mono">${typeof r.eps === 'number' ? '$' + r.eps.toFixed(2) : r.eps}</td>
+    </tr>`).join('');
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PDF EXPORT
+// ════════════════════════════════════════════════════════════════════════════
+async function exportPDF() {
+  if (!currentTicker) { showToast('Run a prediction first.', 'error'); return; }
+  console.log('[export] Exporting PDF for', currentTicker);
+  showToast('Generating PDF report…', 'info');
+
+  try {
+    const res = await fetch(`/export/${currentTicker}`, { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `${currentTicker}_dotmarket_report.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast('PDF report downloaded!', 'success');
+  } catch (err) {
+    showToast(`Export failed: ${err.message}`, 'error');
+    console.error('[export] Error:', err);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// HEALTH CHECK
+// ════════════════════════════════════════════════════════════════════════════
+async function checkHealth() {
+  try {
+    const res  = await fetch('/health');
+    const data = await res.json();
+    const el   = document.getElementById('health-status');
+    if (el) {
+      const n = data.models_loaded ? data.models_loaded.length : 0;
+      el.textContent = `⬤ ${n} model${n !== 1 ? 's' : ''} loaded`;
+      el.style.color = n > 0 ? 'var(--accent-green)' : 'var(--accent-orange)';
+    }
+    console.log('[health]', data);
+  } catch (err) {
+    console.warn('[health] Check failed:', err.message);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// LIVE PRICE REFRESH (every 30s for current ticker)
+// ════════════════════════════════════════════════════════════════════════════
+setInterval(async () => {
+  if (!currentTicker) return;
+  try {
+    const res  = await fetch(`/price/${currentTicker}`);
+    const data = await res.json();
+    if (data.error) return;
+    // Update hero current price without full re-prediction
+    const priceStr = `$${data.price.toLocaleString('en-US', { minimumFractionDigits: 2 })} <span class="live-dot"></span>`;
+    const el = document.getElementById('hero-current');
+    if (el) el.innerHTML = priceStr;
+    console.log('[live-price] Refreshed', currentTicker, '$' + data.price);
+  } catch { /* silent */ }
+}, LIVE_REFRESH);
+
+// ════════════════════════════════════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('[app] DOM ready');
+
+  // Restore theme
+  const savedTheme = localStorage.getItem('dm_theme');
+  if (savedTheme === 'light') {
+    document.body.classList.add('light-mode');
+    document.getElementById('theme-toggle-btn').textContent = '☀️ Light';
+  }
+
+  // Health check
+  checkHealth();
+
+  // Auto-load earnings when watchlist changes (lazy)
+  setTimeout(loadEarningsCalendar, 1500);
+
+  // Auto-predict DEMO on first load to show the UI isn't blank
+  setTimeout(() => {
+    if (!currentTicker) runPrediction('DEMO');
+  }, 500);
+});
+
+// Re-check earnings when watchlist sidebar closes
+document.getElementById('watchlist-overlay').addEventListener('click', () => {
+  setTimeout(loadEarningsCalendar, 300);
+});
+</script>
+
+</body>
+</html>
