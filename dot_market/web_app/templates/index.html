@@ -670,6 +670,7 @@ async function loadNews(ticker) {
         <div class="news-item-content">
           <div class="news-title">${item.title}</div>
           <div class="news-meta">
+            <span style="color: var(--accent-blue);">🏢 ${item.source}</span>
             <span>🕐 ${item.time}</span>
             <span>Score: ${item.score > 0 ? '+' : ''}${item.score.toFixed(2)}</span>
           </div>

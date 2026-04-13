@@ -372,18 +372,31 @@ def predict():
 def news(ticker: str):
     try:
         from textblob import TextBlob
+        import urllib.request
+        import xml.etree.ElementTree as ET
+        from email.utils import parsedate_to_datetime
+        from datetime import timezone
 
         ticker  = ticker.upper().strip()
-        stock   = yf.Ticker(ticker)
-        raw_news = stock.news or []
+        url = f"https://news.google.com/rss/search?q={ticker}+stock+when:7d&hl=en-US&gl=US&ceid=US:en"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        response = urllib.request.urlopen(req)
+        root = ET.fromstring(response.read())
 
         results = []
-        now     = datetime.now()
-        for item in raw_news[:5]:
-            title = item.get("title", "No title")
-            link  = item.get("link",  "#")
-            published = item.get("providerPublishTime", None)
-
+        now = datetime.now(timezone.utc)
+        items = root.findall('.//item')
+        
+        for item in items[:5]:
+            title_node = item.find("title")
+            link_node = item.find("link")
+            source_node = item.find("source")
+            pub_node = item.find("pubDate")
+            
+            title = title_node.text if title_node is not None else "No title"
+            link = link_node.text if link_node is not None else "#"
+            source = source_node.text if source_node is not None else "News"
+            
             blob  = TextBlob(title)
             score = round(blob.sentiment.polarity, 3)
             if score > 0.05:
@@ -393,9 +406,9 @@ def news(ticker: str):
             else:
                 sentiment = "neutral"
 
-            if published:
-                pub_dt = datetime.fromtimestamp(published)
-                diff   = now - pub_dt
+            if pub_node is not None and pub_node.text:
+                pub_dt = parsedate_to_datetime(pub_node.text)
+                diff = now - pub_dt
                 if diff.total_seconds() < 3600:
                     time_str = f"{int(diff.total_seconds() // 60)}m ago"
                 elif diff.total_seconds() < 86400:
@@ -408,6 +421,7 @@ def news(ticker: str):
             results.append({
                 "title":     title,
                 "link":      link,
+                "source":    source,
                 "sentiment": sentiment,
                 "score":     score,
                 "time":      time_str,
